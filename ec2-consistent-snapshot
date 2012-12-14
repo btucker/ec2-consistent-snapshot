@@ -34,6 +34,8 @@ my $mysql                      = 0;
 my $mysql_defaults_file        = undef;
 my $mysql_socket               = undef;
 my $mysql_master_status_file   = undef;
+my $mysql_save_master_status   = undef;
+my $mysql_save_slave_status    = undef;
 my $mysql_username             = undef;
 my $mysql_password             = undef;
 my $mysql_host                 = undef;
@@ -66,6 +68,8 @@ GetOptions(
   'mysql-defaults-file=s'        => \$mysql_defaults_file,
   'mysql-socket=s'               => \$mysql_socket,
   'mysql-master-status-file=s'   => \$mysql_master_status_file,
+  'mysql-save-master-status=s'   => \$mysql_save_master_status,
+  'mysql-save-slave-status=s'    => \$mysql_save_slave_status,
   'mysql-username=s'             => \$mysql_username,
   'mysql-password=s'             => \$mysql_password,
   'mysql-host=s'                 => \$mysql_host,
