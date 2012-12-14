@@ -79,7 +79,15 @@ OPTIONS
     --mysql-master-status-file FILE
         Store the MASTER STATUS output in a file on the snapshot. It will be
         removed after the EBS snapshot is taken. This option will be ignored
-        with --mysql-stop
+        with --mysql-stop [DEPRECATED, use --mysql-save-master-status and/or
+        --mysql-save-slave-status]
+
+    --mysql-save-master-status FILE
+    --mysql-save-slave-status FILE
+        Store the output of `SHOW MASTER STATUS` or `SHOW SLAVE STATUS`
+        in a file on the snapshot.  It will be removed after the EBS
+        snapshot is taken.  Options can be used together, but different
+        file paths should be passed to each.
 
     --mysql-stop
         Indicates that the volume contains data files for a running MySQL
