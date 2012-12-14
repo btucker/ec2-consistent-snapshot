@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # Copyright (C) 2009-2012 Eric Hammond <ehammond@thinksome.com>
 #
@@ -122,7 +122,7 @@ if ( scalar (@descriptions) == 1 ) {
   for ( my $index = 1; $index < scalar (@volume_ids); ++$index ) {
     $descriptions[$index] = $descriptions[0];
   }
-} 
+}
 
 my $mysql_stopped = undef;
 my $mysql_dbh = undef;
@@ -158,12 +158,16 @@ END {
     run_command([$post_thaw_command]);
   }
 
-  if ( defined($mysql_master_status_file) ) {
-    $Debug and warn "$Prog: ", scalar localtime,
-      ": removing master info file: $mysql_master_status_file\n";
-    if ( not $Noaction ) {
-      unlink $mysql_master_status_file
-        or die "$Prog: Couldn't remove file: $mysql_master_status_file: $!\n";
+  for my $status_file ( $mysql_master_status_file,
+                        $mysql_save_master_status,
+                        $mysql_save_slave_status ) {
+    if ( defined($status_file) && -e $status_file ) {
+      $Debug and warn "$Prog: ", scalar localtime,
+        ": removing master info file: $status_file\n";
+      if ( not $Noaction ) {
+        unlink $status_file
+          or die "$Prog: Couldn't remove file: $status_file: $!\n";
+      }
     }
   }
 
@@ -304,48 +308,75 @@ sub mysql_lock {
     $lock_sleep,
   );
 
-  my ($mysql_logfile, $mysql_position,
-      $mysql_binlog_do_db, $mysql_binlog_ignore_db);
+  my ($mysql_master_logfile, $mysql_master_position,
+      $mysql_master_binlog_do_db, $mysql_master_binlog_ignore_db,
+      $mysql_slave_logfile, $mysql_slave_position,
+      $mysql_slave_binlog_do_db, $mysql_slave_binlog_ignore_db);
   if ( not $Noaction ) {
-    # This might be a slave database already
-    my $slave_status = $mysql_dbh->selectrow_hashref(q{ SHOW SLAVE STATUS });
-    $mysql_logfile           = $slave_status->{Slave_IO_State}
-                             ? $slave_status->{Master_Log_File}
-                             : undef;
-    $mysql_position          = $slave_status->{Read_Master_Log_Pos};
-    $mysql_binlog_do_db      = $slave_status->{Replicate_Do_DB};
-    $mysql_binlog_ignore_db  = $slave_status->{Replicate_Ignore_DB};
+    if ($mysql_master_status_file or $mysql_save_slave_status) {
+      # This might be a slave database already
+      my $slave_status = $mysql_dbh->selectrow_hashref(q{ SHOW SLAVE STATUS });
+      $mysql_slave_logfile           = $slave_status->{Slave_IO_State}
+                                         ? $slave_status->{slave_Log_File}
+                                         : undef;
+      $mysql_slave_position          = $slave_status->{Read_Master_Log_Pos};
+      $mysql_slave_binlog_do_db      = $slave_status->{Replicate_Do_DB};
+      $mysql_slave_binlog_ignore_db  = $slave_status->{Replicate_Ignore_DB};
+    }
 
-    # or this might be the master
-    ($mysql_logfile, $mysql_position,
-     $mysql_binlog_do_db, $mysql_binlog_ignore_db) =
-      $mysql_dbh->selectrow_array(q{  SHOW MASTER STATUS  })
-      unless $mysql_logfile;
+    if (($mysql_master_status_file and not $mysql_slave_logfile) or $mysql_save_master_status) {
+      # or this might be the master
+      ($mysql_master_logfile, $mysql_master_position,
+       $mysql_master_binlog_do_db, $mysql_master_binlog_ignore_db) =
+        $mysql_dbh->selectrow_array(q{  SHOW MASTER STATUS  })
+    }
   }
 
   $mysql_dbh->do(q{ SET SQL_LOG_BIN=1 }) unless $Noaction;
 
-  print "$Prog: master_log_file=\"$mysql_logfile\",",
-              " master_log_pos=$mysql_position\n"
-    if $mysql_logfile and not $Quiet;
+  if ( defined($mysql_master_status_file) and ($mysql_slave_logfile or $mysql_master_logfile) ) {
+    write_mysql_replication_status_file($mysql_master_status_file,
+                                        ($mysql_slave_logfile or $mysql_master_logfile),
+                                        ($mysql_slave_position or $mysql_master_position),
+                                        ($mysql_slave_binlog_do_db or $mysql_master_binlog_do_db),
+                                        ($mysql_slave_binlog_ignore_db or $mysql_master_binlog_ignore_db));
+  }
 
-  if ( defined($mysql_master_status_file) && $mysql_logfile ) {
-    $Debug and warn "$Prog: ", scalar localtime,
-      ": writing MASTER STATUS to $mysql_master_status_file\n";
-    if ( not $Noaction ) {
-      open(MYSQLMASTERSTATUS,"> $mysql_master_status_file") or
-        die "$Prog: Unable to open for write: $mysql_master_status_file: $!\n";
-      print MYSQLMASTERSTATUS <<"EOM";
+  if ( defined($mysql_save_master_status) and $mysql_master_logfile ) {
+    write_mysql_replication_status_file($mysql_save_master_status,
+                                        $mysql_master_logfile,
+                                        $mysql_master_position,
+                                        $mysql_master_binlog_do_db,
+                                        $mysql_master_binlog_ignore_db);
+
+  }
+
+  if ( defined($mysql_save_slave_status) and $mysql_slave_logfile ) {
+    write_mysql_replication_status_file($mysql_save_slave_status,
+                                        $mysql_slave_logfile,
+                                        $mysql_slave_position,
+                                        $mysql_slave_binlog_do_db,
+                                        $mysql_slave_binlog_ignore_db);
+
+  }
+}
+
+sub write_mysql_replication_status_file {
+  my ($status_file, $mysql_logfile, $mysql_position, $mysql_binlog_do_db, $mysql_binlog_ignore_db) = @_;
+  $Debug and warn "$Prog: ", scalar localtime,
+    ": writing replication status to $status_file\n";
+
+  if ( not $Noaction ) {
+    open(MYSQLSTATUS,"> $status_file") or
+      die "$Prog: Unable to open for write: $status_file: $!\n";
+    print MYSQLSTATUS <<"EOM";
 master_log_file="$mysql_logfile"
 master_log_pos="$mysql_position"
 master_binlog_do_db="$mysql_binlog_do_db"
 master_binlog_ignore_db="$mysql_binlog_ignore_db"
 EOM
-      close(MYSQLMASTERSTATUS);
-    }
+    close(MYSQLSTATUS);
   }
-
-  return ($mysql_logfile, $mysql_position);
 }
 
 sub mysql_unlock {
